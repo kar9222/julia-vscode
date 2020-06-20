@@ -18,10 +18,8 @@ function repl_runcode_request(conn, params::ReplRunCodeRequestParams)
     rendered_result = nothing
 
     hideprompt() do
-        if isdefined(Main, :Revise) && isdefined(Main.Revise, :revise) && Main.Revise.revise isa Function
-            let mode = get(ENV, "JULIA_REVISE", "auto")
-                mode == "auto" && Main.Revise.revise()
-            end
+        if g_use_revise[]
+            Revise.revise()
         end
         if show_code
             for (i,line) in enumerate(eachline(IOBuffer(source_code)))

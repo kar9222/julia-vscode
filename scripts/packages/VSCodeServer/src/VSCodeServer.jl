@@ -20,6 +20,7 @@ end
 
 include("../../JSON/src/JSON.jl")
 include("../../CodeTracking/src/CodeTracking.jl")
+include("../../OrderedCollections/src/OrderedCollections.jl")
 
 module JSONRPC
     import ..JSON
@@ -34,13 +35,43 @@ module JuliaInterpreter
     include("../../JuliaInterpreter/src/packagedef.jl")
 end
 
+module LoweredCodeUtils
+    using ..JuliaInterpreter
+    using ..JuliaInterpreter: SSAValue, SlotNumber, Frame
+    using ..JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, is_quotenode, whichtt,
+                        next_until!, finish_and_return!, get_return, nstatements, codelocation
+
+
+    include("../../LoweredCodeUtils/src/packagedef.jl")
+end
+
 module DebugAdapter
     import ..JuliaInterpreter
 
     include("../../DebugAdapter/src/packagedef.jl")
 end
 
+module Revise
+    using ..OrderedCollections
+    using ..CodeTracking
+    using ..JuliaInterpreter
+    using ..LoweredCodeUtils
+
+    using ..CodeTracking: PkgFiles, basedir, srcfiles
+    using ..JuliaInterpreter: whichtt, is_doc_expr, step_expr!, finish_and_return!, get_return
+    using ..JuliaInterpreter: @lookup, moduleof, scopeof, pc_expr, prepare_thunk, split_expressions,
+                        linetable, codelocs, LineTypes
+    using ..LoweredCodeUtils: next_or_nothing!, isanonymous_typedef
+    using ..CodeTracking: line_is_decl
+    using ..JuliaInterpreter: is_global_ref
+    using ..CodeTracking: basepath
+
+
+    include("../../Revise/src/core.jl")
+end
+
 const conn_endpoint = Ref{Union{Nothing,JSONRPC.JSONRPCEndpoint}}(nothing)
+const g_use_revise = Ref{Bool}(false)
 
 include("../../../error_handler.jl")
 include("misc.jl")

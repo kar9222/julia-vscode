@@ -74,7 +74,8 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
                     shellArgs: jlarg1.concat(getArgs()),
                     env: {
                         JULIA_EDITOR: get_editor(),
-                        JULIA_NUM_THREADS: inferJuliaNumThreads()
+                        JULIA_NUM_THREADS: inferJuliaNumThreads(),
+                        JULIA_REVISE: 'manual'
                     }
                 })
         }
@@ -101,7 +102,8 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
                     shellArgs: jlarg1.concat(getArgs()),
                     env: {
                         JULIA_EDITOR: get_editor(),
-                        JULIA_NUM_THREADS: inferJuliaNumThreads()
+                        JULIA_NUM_THREADS: inferJuliaNumThreads(),
+                        JULIA_REVISE: 'manual'
                     }
                 })
         }
