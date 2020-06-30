@@ -5,15 +5,16 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import * as rpc from 'vscode-jsonrpc'
 import * as vslc from 'vscode-languageclient'
-import { TextDocumentPositionParams } from 'vscode-languageclient'
 import { onSetLanguageClient } from '../extension'
 import * as jlpkgenv from '../jlpkgenv'
 import * as juliaexepath from '../juliaexepath'
 import * as telemetry from '../telemetry'
 import { generatePipeName, inferJuliaNumThreads } from '../utils'
+import { VersionedTextDocumentPositionParams } from './misc'
 import * as modules from './modules'
 import * as plots from './plots'
 import * as results from './results'
+import { Frame } from './results'
 import * as workspace from './workspace'
 
 
@@ -137,6 +138,12 @@ function debuggerEnter(code: string) {
     vscode.debug.startDebugging(undefined, x)
 }
 
+interface ReturnResult {
+    inline: string,
+    all: string,
+    stackframe: null | Array<Frame>
+}
+
 const requestTypeReplRunCode = new rpc.RequestType<{
     filename: string,
     line: number,
@@ -145,7 +152,7 @@ const requestTypeReplRunCode = new rpc.RequestType<{
     mod: string,
     showCodeInREPL: boolean,
     showResultInREPL: boolean
-}, void, void, void>('repl/runcode')
+}, ReturnResult, void, void>('repl/runcode')
 
 const notifyTypeDisplay = new rpc.NotificationType<{ kind: string, data: any }, void>('display')
 const notifyTypeDebuggerEnter = new rpc.NotificationType<string, void>('debugger/enter')
@@ -196,6 +203,8 @@ function startREPLMsgServer(pipename: string) {
 async function executeFile(uri?: vscode.Uri) {
     telemetry.traceEvent('command-executeFile')
 
+    const editor = vscode.window.activeTextEditor
+
     await startREPL(true, false)
 
     let module = 'Main'
@@ -207,7 +216,6 @@ async function executeFile(uri?: vscode.Uri) {
         code = Buffer.from(readBytes).toString('utf8')
     }
     else {
-        const editor = vscode.window.activeTextEditor
         if (!editor) {
             return
         }
@@ -226,46 +234,60 @@ async function executeFile(uri?: vscode.Uri) {
             mod: module,
             code: code,
             showCodeInREPL: false,
-            showResultInREPL: false
+            showResultInREPL: true
         }
     )
     await workspace.replFinishEval()
 }
 
+async function getBlockRange(params): Promise<vscode.Position[]> {
+    const zeroPos = new vscode.Position(0, 0)
+    const zeroReturn = [zeroPos, zeroPos, params.position]
+
+    const err = 'Error: Julia Language server is not running.\n\nPlease wait a few seconds and try again once the `Starting Julia Language Server...` message in the status bar is gone.'
+
+    if (g_languageClient === null) {
+        vscode.window.showErrorMessage(err)
+        return zeroReturn
+    }
+    let ret_val: vscode.Position[]
+    try {
+        ret_val = await g_languageClient.sendRequest('julia/getCurrentBlockRange', params)
+    } catch (err) {
+        if (err.message === 'Language client is not ready yet') {
+            vscode.window.showErrorMessage(err)
+            return zeroReturn
+        } else {
+            console.error(err)
+            throw err
+        }
+    }
+
+    return ret_val
+}
+
 async function selectJuliaBlock() {
     telemetry.traceEvent('command-selectCodeBlock')
-    if (g_languageClient === null) {
-        vscode.window.showErrorMessage('Error: Language server is not running.')
-    }
-    else {
-        const editor = vscode.window.activeTextEditor
-        const params: TextDocumentPositionParams = { textDocument: vslc.TextDocumentIdentifier.create(editor.document.uri.toString()), position: new vscode.Position(editor.selection.start.line, editor.selection.start.character) }
 
-        try {
-            const ret_val: vscode.Position[] = await g_languageClient.sendRequest('julia/getCurrentBlockRange', params)
-
-            const start_pos = new vscode.Position(ret_val[0].line, ret_val[0].character)
-            const end_pos = new vscode.Position(ret_val[1].line, ret_val[1].character)
-            vscode.window.activeTextEditor.selection = new vscode.Selection(start_pos, end_pos)
-            vscode.window.activeTextEditor.revealRange(new vscode.Range(start_pos, end_pos))
-        }
-        catch (ex) {
-            if (ex.message === 'Language client is not ready yet') {
-                vscode.window.showErrorMessage('Select code block only works once the Julia Language Server is ready.')
-            }
-            else {
-                throw ex
-            }
-        }
+    const editor = vscode.window.activeTextEditor
+    const params: VersionedTextDocumentPositionParams = {
+        textDocument: vslc.TextDocumentIdentifier.create(editor.document.uri.toString()),
+        version: editor.document.version,
+        position: editor.document.validatePosition(new vscode.Position(editor.selection.start.line, editor.selection.start.character))
     }
+
+    const ret_val: vscode.Position[] = await getBlockRange(params)
+
+    const start_pos = editor.document.validatePosition(new vscode.Position(ret_val[0].line, ret_val[0].character))
+    const end_pos = editor.document.validatePosition(new vscode.Position(ret_val[1].line, ret_val[1].character))
+    vscode.window.activeTextEditor.selection = new vscode.Selection(start_pos, end_pos)
+    vscode.window.activeTextEditor.revealRange(new vscode.Range(start_pos, end_pos))
 }
 
 const g_cellDelimiter = new RegExp('^##(?!#)')
 
 async function executeCell(shouldMove: boolean = false) {
     telemetry.traceEvent('command-executeCell')
-
-    await startREPL(true, false)
 
     const ed = vscode.window.activeTextEditor
     const doc = ed.document
@@ -288,10 +310,12 @@ async function executeCell(shouldMove: boolean = false) {
         }
     }
     end -= 1
-    const startpos = new vscode.Position(start, 0)
-    const endpos = new vscode.Position(end, doc.lineAt(end).text.length)
-    const nextpos = new vscode.Position(end + 1, 0)
+    const startpos = ed.document.validatePosition(new vscode.Position(start, 0))
+    const endpos = ed.document.validatePosition(new vscode.Position(end, doc.lineAt(end).text.length))
+    const nextpos = ed.document.validatePosition(new vscode.Position(end + 1, 0))
     const code = doc.getText(new vscode.Range(startpos, endpos))
+
+    await startREPL(true, false)
 
     const module: string = await modules.getModuleForEditor(ed, startpos)
 
@@ -306,26 +330,29 @@ async function executeCell(shouldMove: boolean = false) {
 async function evaluateBlockOrSelection(shouldMove: boolean = false) {
     telemetry.traceEvent('command-executeCodeBlockOrSelection')
 
-    await startREPL(true, false)
 
     const editor = vscode.window.activeTextEditor
     const editorId = vslc.TextDocumentIdentifier.create(editor.document.uri.toString())
+    const selections = editor.selections.slice()
 
-    for (const selection of editor.selections) {
+    await startREPL(true, false)
+
+    for (const selection of selections) {
         let range: vscode.Range = null
         let nextBlock: vscode.Position = null
-        const startpos: vscode.Position = new vscode.Position(selection.start.line, selection.start.character)
-        const params: TextDocumentPositionParams = {
+        const startpos: vscode.Position = editor.document.validatePosition(new vscode.Position(selection.start.line, selection.start.character))
+        const params: VersionedTextDocumentPositionParams = {
             textDocument: editorId,
+            version: editor.document.version,
             position: startpos
         }
 
         const module: string = await modules.getModuleForEditor(editor, startpos)
 
         if (selection.isEmpty) {
-            const currentBlock: vscode.Position[] = await g_languageClient.sendRequest('julia/getCurrentBlockRange', params)
+            const currentBlock = await getBlockRange(params)
             range = new vscode.Range(currentBlock[0].line, currentBlock[0].character, currentBlock[1].line, currentBlock[1].character)
-            nextBlock = new vscode.Position(currentBlock[2].line, currentBlock[2].character)
+            nextBlock = editor.document.validatePosition(new vscode.Position(currentBlock[2].line, currentBlock[2].character))
         } else {
             range = new vscode.Range(selection.start, selection.end)
         }
@@ -364,15 +391,10 @@ async function evaluate(editor: vscode.TextEditor, range: vscode.Range, text: st
 
     let r: results.Result = null
     if (resultType !== 'REPL') {
-        r = results.addResult(editor, range, {
-            content: ' ⟳ ',
-            isIcon: false,
-            hoverContent: '',
-            isError: false
-        })
+        r = results.addResult(editor, range, ' ⟳ ', '')
     }
 
-    const result: any = await g_connection.sendRequest(
+    const result: ReturnResult = await g_connection.sendRequest(
         requestTypeReplRunCode,
         {
             filename: editor.document.fileName,
@@ -384,17 +406,15 @@ async function evaluate(editor: vscode.TextEditor, range: vscode.Range, text: st
             showResultInREPL: resultType !== 'inline'
         }
     )
+
     await workspace.replFinishEval()
 
     if (resultType !== 'REPL') {
-        const hoverString = '```\n' + result.all.toString() + '\n```'
-
-        r.setContent({
-            content: ' ' + result.inline.toString() + ' ',
-            isIcon: false,
-            hoverContent: hoverString,
-            isError: result.iserr
-        })
+        if (result.stackframe) {
+            results.clearStackTrace()
+            results.setStackTrace(r, result.all, result.stackframe)
+        }
+        r.setContent(results.resultContent(' ' + result.inline + ' ', result.all, Boolean(result.stackframe)))
     }
 }
 

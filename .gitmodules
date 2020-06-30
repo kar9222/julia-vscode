@@ -46,3 +46,6 @@
 [submodule "scripts/packages/Revise"]
 	path = scripts/packages/Revise
 	url = https://github.com/timholy/Revise.jl.git
+[submodule "scripts/packages/DebugAdapter"]
+	path = scripts/packages/DebugAdapter
+	url = https://github.com/julia-vscode/DebugAdapter.jl.git

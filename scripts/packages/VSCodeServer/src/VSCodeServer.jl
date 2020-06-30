@@ -24,7 +24,7 @@ include("../../OrderedCollections/src/OrderedCollections.jl")
 
 module JSONRPC
     import ..JSON
-    import ..UUIDs
+    import UUIDs
 
     include("../../JSONRPC/src/packagedef.jl")
 end
@@ -47,6 +47,9 @@ end
 
 module DebugAdapter
     import ..JuliaInterpreter
+    import ..JSON
+    import ..JSONRPC
+    import ..JSONRPC: @dict_readable, Outbound
 
     include("../../DebugAdapter/src/packagedef.jl")
 end
