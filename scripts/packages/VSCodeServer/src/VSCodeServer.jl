@@ -60,17 +60,13 @@ module Revise
     using ..JuliaInterpreter
     using ..LoweredCodeUtils
 
-    using ..CodeTracking: PkgFiles, basedir, srcfiles
+    using ..CodeTracking: PkgFiles, basedir, srcfiles, line_is_decl, basepath
     using ..JuliaInterpreter: whichtt, is_doc_expr, step_expr!, finish_and_return!, get_return
     using ..JuliaInterpreter: @lookup, moduleof, scopeof, pc_expr, prepare_thunk, split_expressions,
-                        linetable, codelocs, LineTypes
+                        linetable, codelocs, LineTypes, is_GotoIfNot, is_global_ref
     using ..LoweredCodeUtils: next_or_nothing!, isanonymous_typedef
-    using ..CodeTracking: line_is_decl
-    using ..JuliaInterpreter: is_global_ref
-    using ..CodeTracking: basepath
 
-
-    include("../../Revise/src/core.jl")
+    include("../../Revise/src/packagedef.jl")
 end
 
 const conn_endpoint = Ref{Union{Nothing,JSONRPC.JSONRPCEndpoint}}(nothing)
@@ -101,7 +97,7 @@ function serve(args...; is_dev=false, crashreporting_pipename::Union{AbstractStr
         msg_dispatcher[repl_showingrid_notification_type] = repl_showingrid_notification
         msg_dispatcher[repl_loadedModules_request_type] = repl_loadedModules_request
         msg_dispatcher[repl_isModuleLoaded_request_type] = repl_isModuleLoaded_request
-        msg_dispatcher[repl_startdebugger_notification_type] = (conn, params)->repl_startdebugger_request(conn, params, crashreporting_pipename)
+        msg_dispatcher[repl_startdebugger_notification_type] = (conn, params) -> repl_startdebugger_request(conn, params, crashreporting_pipename)
 
         while true
             msg = JSONRPC.get_next_message(conn_endpoint[])
