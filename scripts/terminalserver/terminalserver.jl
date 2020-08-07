@@ -1,9 +1,6 @@
 # this script basially only handles `ARGS`
 
-
-if "USE_REVISE" in Base.ARGS
-    ENV["JULIA_REVISE"] = "auto"
-end
+ENV["JULIA_REVISE"] = "manual"
 
 Base.push!(LOAD_PATH, joinpath(@__DIR__, "..", "packages"))
 using VSCodeServer
@@ -11,18 +8,8 @@ pop!(LOAD_PATH)
 
 let
     args = [popfirst!(Base.ARGS) for _ in 1:5]
-    # load Revise ?
-    if "USE_REVISE=true" in args
-        VSCodeServer.g_use_revise[] = true
-        try
-            @static if VERSION < v"1.5"
-                Revise.async_steal_repl_backend()
-            end
-        catch err
-        end
-    end
 
-    ENV["JULIA_REVISE"] = "manual"
+    VSCodeServer.g_use_revise[] = "USE_REVISE=true" in args
 
     atreplinit() do repl
         "USE_PLOTPANE=true" in args && Base.Multimedia.pushdisplay(VSCodeServer.InlineDisplay())

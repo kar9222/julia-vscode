@@ -78,6 +78,11 @@ end
 function evalrepl(m, line, repl, main_mode)
     return try
         JSONRPC.send_notification(conn_endpoint[], "repl/starteval", nothing)
+
+        if g_use_revise[]
+            Base.invokelatest(Revise.revise)
+        end
+
         try
             repleval(m, line, REPL.repl_filename(repl, main_mode.hist))
         catch err

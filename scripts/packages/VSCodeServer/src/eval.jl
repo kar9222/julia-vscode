@@ -24,6 +24,7 @@ function repl_runcode_request(conn, params::ReplRunCodeRequestParams)
         if g_use_revise[]
             Revise.revise()
         end
+
         if show_code
             for (i,line) in enumerate(eachline(IOBuffer(source_code)))
                 if i==1
