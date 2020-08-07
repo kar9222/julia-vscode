@@ -80,7 +80,7 @@ function evalrepl(m, line, repl, main_mode)
         JSONRPC.send_notification(conn_endpoint[], "repl/starteval", nothing)
 
         if g_use_revise[]
-            Base.invokelatest(Revise.revise)
+            Revise.revise()
         end
 
         try
