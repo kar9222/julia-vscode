@@ -78,7 +78,7 @@ function treerender(x::Leaf)
     )
 end
 
-getfield_safe(x, f, default = "#undef") = isdefined(x, f) ? getfield(x, f) : default
+getfield_safe(x, f, default = UNDEF) = isdefined(x, f) ? getfield(x, f) : default
 
 function treerender(x)
     fields = fieldnames(typeof(x))
@@ -121,12 +121,24 @@ function treerender(x::Module)
     end))
 end
 
+struct Undef end
+
+const UNDEF = Undef()
+
+function assign_undefs(xs)
+    xs′ = similar(xs, Any)
+    for i in eachindex(xs)
+        xs′[i] = isassigned(xs, i) ? xs[i] : UNDEF
+    end
+    return xs′
+end
+
 function treerender(x::AbstractArray{T,N}) where {T,N}
     treerender(LazyTree(string(typeof(x), " with $(pluralize(size(x), "element", "elements"))"), wsicon(x), length(x) == 0, function ()
         if length(x) > MAX_PARTITION_LENGTH
             partition_by_keys(x, sz = MAX_PARTITION_LENGTH)
         else
-            collect([SubTree(repr(k), wsicon(v), v) for (k, v) in zip(keys(x), vec(x))])
+            collect([SubTree(repr(k), wsicon(v), v) for (k, v) in zip(keys(x), vec(assign_undefs(x)))])
         end
     end))
 end
@@ -141,6 +153,7 @@ treerender(x::Ptr) = treerender(Leaf(string(typeof(x), ": 0x", string(UInt(x), b
 treerender(x::Text) = treerender(Leaf(x.content, wsicon(x)))
 treerender(x::Function) = treerender(Leaf(strlimit(string(x), limit = 100), wsicon(x)))
 treerender(x::Type) = treerender(Leaf(strlimit(string(x), limit = 100), wsicon(x)))
+treerender(x::Undef) = treerender(Leaf("#undef", wsicon(x)))
 
 function partition_by_keys(x, _keys = keys(x); sz = 20, maxparts = 100)
     partitions = Iterators.partition(_keys, max(sz, length(_keys) ÷ maxparts))
@@ -153,7 +166,7 @@ function partition_by_keys(x, _keys = keys(x); sz = 20, maxparts = 100)
             end))
         else
             push!(out, LazyTree(head, function ()
-                collect([SubTree(repr(k), wsicon(v), v) for (k, v) in zip(part, getindex.(Ref(x), part))])
+                collect([SubTree(repr(k), wsicon(v), v) for (k, v) in zip(part, getindex.(Ref(x), assign_undefs(part)))])
             end))
         end
     end
@@ -185,8 +198,11 @@ function getvariables()
             tree.canshow = can_display(x)
             push!(variables, tree)
         catch err
-            printstyled("Internal Error: ", bold = true, color = Base.error_color())
-            Base.display_error(err, catch_backtrace())
+            # FIXME: This should end up in the tree view as an "error child".
+            # Ref: https://github.com/julia-vscode/julia-vscode/issues/1491
+            #
+            # printstyled("Internal Error: ", bold = true, color = Base.error_color())
+            # Base.display_error(err, catch_backtrace())
         end
     end
 
@@ -205,13 +221,15 @@ end
 
 wsicon(::Any) = "symbol-variable"
 wsicon(::Module) = "symbol-namespace"
-wsicon(f::Function) = "symbol-method"
+wsicon(::Function) = "symbol-method"
 wsicon(::Number) = "symbol-numeric"
+wsicon(::Bool) = "symbol-boolean"
 wsicon(::AbstractString) = "symbol-string"
 wsicon(::AbstractArray) = "symbol-array"
 wsicon(::Type) = "symbol-structure"
 wsicon(::AbstractDict) = "symbol-enum"
 wsicon(::Exception) = "warning"
+wsicon(::Undef) = "question"
 
 # handle lazy clicks
 
@@ -226,8 +244,11 @@ function get_lazy(id::Int)
             return [treerender(Text("[out of date result]"))]
         end
     catch err
-        printstyled("Internal Error: ", bold = true, color = Base.error_color())
-        Base.display_error(err, catch_backtrace())
+        # FIXME: This should end up in the tree view as an "error child".
+        # Ref: https://github.com/julia-vscode/julia-vscode/issues/1491
+        #
+        # printstyled("Internal Error: ", bold = true, color = Base.error_color())
+        # Base.display_error(err, catch_backtrace())
         return []
     end
 end

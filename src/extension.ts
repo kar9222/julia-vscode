@@ -1,12 +1,14 @@
 'use strict'
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import { SeverityLevel } from 'applicationinsights/out/Declarations/Contracts'
 import * as os from 'os'
 import * as path from 'path'
 import * as vscode from 'vscode'
 import * as vslc from 'vscode-languageclient'
 import { LanguageClient, LanguageClientOptions, RevealOutputChannelOn } from 'vscode-languageclient'
-import { JuliaDebugSession } from './debugger/juliaDebug'
+import { JuliaDebugFeature } from './debugger/debugFeature'
+import { ProfilerResultsProvider } from './interactive/profiler'
 import * as repl from './interactive/repl'
 import * as jlpkgenv from './jlpkgenv'
 import * as juliaexepath from './juliaexepath'
@@ -22,59 +24,69 @@ let g_context: vscode.ExtensionContext = null
 
 export async function activate(context: vscode.ExtensionContext) {
     await telemetry.init(context)
+    try {
 
-    telemetry.traceEvent('activate')
+        telemetry.traceEvent('activate')
 
-    telemetry.startLsCrashServer()
+        telemetry.startLsCrashServer()
 
-    g_context = context
+        g_context = context
 
-    console.log('Activating extension language-julia')
+        console.log('Activating extension language-julia')
 
-    // Config change
-    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(changeConfig))
+        // Config change
+        context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(changeConfig))
 
-    // Language settings
-    vscode.languages.setLanguageConfiguration('julia', {
-        indentationRules: {
-            increaseIndentPattern: /^(\s*|.*=\s*|.*@\w*\s*)[\w\s]*\b(if|while|for|function|macro|immutable|struct|type|let|quote|try|begin|.*\)\s*do|else|elseif|catch|finally)\b(?!.*\bend\b[^\]]*$).*$/,
-            decreaseIndentPattern: /^\s*(end|else|elseif|catch|finally)\b.*$/
+        // Language settings
+        vscode.languages.setLanguageConfiguration('julia', {
+            indentationRules: {
+                increaseIndentPattern: /^(\s*|.*=\s*|.*@\w*\s*)[\w\s]*\b(if|while|for|function|macro|immutable|struct|type|let|quote|try|begin|.*\)\s*do|else|elseif|catch|finally)\b(?!.*\bend\b[^\]]*$).*$/,
+                decreaseIndentPattern: /^\s*(end|else|elseif|catch|finally)\b.*$/
+            }
+        })
+
+        // Active features from other files
+        juliaexepath.activate(context)
+        await juliaexepath.getJuliaExePath() // We run this function now and await to make sure we don't run in twice simultaneously later
+        repl.activate(context)
+        weave.activate(context)
+        tasks.activate(context)
+        smallcommands.activate(context)
+        packagepath.activate(context)
+        openpackagedirectory.activate(context)
+        jlpkgenv.activate(context)
+
+        context.subscriptions.push(new JuliaDebugFeature(context))
+
+        // Start language server
+        startLanguageServer()
+
+        if (vscode.workspace.getConfiguration('julia').get<boolean>('enableTelemetry') === null) {
+            vscode.window.showInformationMessage('To help improve the Julia extension, you can allow the development team to collect usage data. Read our [privacy statement](https://github.com/julia-vscode/julia-vscode/wiki/Privacy-Policy) to learn more how we use usage data and how to permanently hide this notification.', 'I agree to usage data collection')
+                .then(telemetry_choice => {
+                    if (telemetry_choice === 'I agree to usage data collection') {
+                        vscode.workspace.getConfiguration('julia').update('enableTelemetry', true, true)
+                    }
+                })
         }
-    })
 
-    // Active features from other files
-    juliaexepath.activate(context)
-    await juliaexepath.getJuliaExePath() // We run this function now and await to make sure we don't run in twice simultaneously later
-    repl.activate(context)
-    weave.activate(context)
-    tasks.activate(context)
-    smallcommands.activate(context)
-    packagepath.activate(context)
-    openpackagedirectory.activate(context)
-    jlpkgenv.activate(context)
+        context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('juliavsodeprofilerresults', new ProfilerResultsProvider()))
 
-    // register a configuration provider for 'mock' debug type
-    const provider = new JuliaDebugConfigurationProvider()
-    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('julia', provider))
+        const api = {
+            version: 1,
+            async getEnvironment() {
+                return await jlpkgenv.getEnvPath()
+            },
+            async getJuliaPath() {
+                return await juliaexepath.getJuliaExePath()
+            }
+        }
 
-    const factory = new InlineDebugAdapterFactory()
-    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('julia', factory))
-
-    vscode.commands.registerCommand('language-julia.debug.getActiveJuliaEnvironment', async config => {
-        const pkgenvpath = await jlpkgenv.getEnvPath()
-        return pkgenvpath
-    })
-
-    // Start language server
-    startLanguageServer()
-
-    if (vscode.workspace.getConfiguration('julia').get<boolean>('enableTelemetry') === null) {
-        vscode.window.showInformationMessage('To help improve the Julia extension, you can allow the development team to collect usage data. Read our [privacy statement](https://github.com/julia-vscode/julia-vscode/wiki/Privacy-Policy) to learn more how we use usage data and how to permanently hide this notification.', 'I agree to usage data collection')
-            .then(telemetry_choice => {
-                if (telemetry_choice === 'I agree to usage data collection') {
-                    vscode.workspace.getConfiguration('julia').update('enableTelemetry', true, true)
-                }
-            })
+        return api
+    }
+    catch (err) {
+        telemetry.handleNewCrashReportFromException(err, 'Extension')
+        throw (err)
     }
 }
 
@@ -150,7 +162,11 @@ async function startLanguageServer() {
                 const validatedPosition = document.validatePosition(position)
 
                 if (validatedPosition !== position) {
-                    telemetry.traceTrace({ message: `Middleware found a change in position in provideCompletionItem. Original ${position.line}:${position.character}, validated ${validatedPosition.line}:${validatedPosition.character}`})
+                    telemetry.traceTrace({
+                        message: `Middleware found a change in position in provideCompletionItem. Original ${position.line}:${position.character}, validated ${validatedPosition.line}:${validatedPosition.character}`,
+                        severity: SeverityLevel.Error
+
+                    })
 
                 }
 
@@ -161,7 +177,10 @@ async function startLanguageServer() {
                 const validatedPosition = document.validatePosition(position)
 
                 if (validatedPosition !== position) {
-                    telemetry.traceTrace({ message: `Middleware found a change in position in provideDefinition. Original ${position.line}:${position.character}, validated ${validatedPosition.line}:${validatedPosition.character}` })
+                    telemetry.traceTrace({
+                        message: `Middleware found a change in position in provideDefinition. Original ${position.line}:${position.character}, validated ${validatedPosition.line}:${validatedPosition.character}`,
+                        severity: SeverityLevel.Error
+                    })
                 }
 
                 return await next(document, position, token)
@@ -204,62 +223,5 @@ async function startLanguageServer() {
         setLanguageClient()
         disposable.dispose()
         startupNotification.dispose()
-    }
-}
-
-export class JuliaDebugConfigurationProvider
-implements vscode.DebugConfigurationProvider {
-
-    public resolveDebugConfiguration(
-        folder: vscode.WorkspaceFolder | undefined,
-        config: vscode.DebugConfiguration,
-        token?: vscode.CancellationToken,
-    ): vscode.ProviderResult<vscode.DebugConfiguration> {
-
-        return (async () => {
-            if (!config.request) {
-                config.request = 'launch'
-            }
-
-            if (!config.type) {
-                config.type = 'julia'
-            }
-
-            if (!config.name) {
-                config.name = 'Launch Julia'
-            }
-
-            if (!config.program && config.request !== 'attach') {
-                config.program = vscode.window.activeTextEditor.document.fileName
-            }
-
-            if (!config.internalConsoleOptions) {
-                config.internalConsoleOptions = 'neverOpen'
-            }
-
-            if (!config.stopOnEntry) {
-                config.stopOnEntry = false
-            }
-
-            if (!config.cwd && config.request !== 'attach') {
-                config.cwd = '${workspaceFolder}'
-            }
-
-            if (!config.juliaEnv && config.request !== 'attach') {
-                config.juliaEnv = '${command:activeJuliaEnvironment}'
-            }
-
-            return config
-        })()
-    }
-
-}
-
-class InlineDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
-
-    createDebugAdapterDescriptor(_session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        return (async () => {
-            return new vscode.DebugAdapterInlineImplementation(<any>new JuliaDebugSession(g_context, await juliaexepath.getJuliaExePath()))
-        })()
     }
 }

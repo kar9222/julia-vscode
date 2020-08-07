@@ -13,6 +13,7 @@ import { generatePipeName, inferJuliaNumThreads } from '../utils'
 import { VersionedTextDocumentPositionParams } from './misc'
 import * as modules from './modules'
 import * as plots from './plots'
+import { showProfileResult, showProfileResultFile } from './profiler'
 import * as results from './results'
 import { Frame } from './results'
 import * as workspace from './workspace'
@@ -48,18 +49,12 @@ function get_editor(): string {
 async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
     if (g_terminal === null) {
         const pipename = generatePipeName(process.pid.toString(), 'vsc-julia-repl')
-        const args = path.join(g_context.extensionPath, 'scripts', 'terminalserver', 'terminalserver.jl')
+        const startupPath = path.join(g_context.extensionPath, 'scripts', 'terminalserver', 'terminalserver.jl')
         function getArgs() {
-            const jlarg2 = [args, pipename, telemetry.getCrashReportingPipename()]
-            if (vscode.workspace.getConfiguration('julia').get('useRevise')) {
-                jlarg2.push('USE_REVISE')
-            }
-            if (vscode.workspace.getConfiguration('julia').get('usePlotPane')) {
-                jlarg2.push('USE_PLOTPANE')
-            }
-            if (process.env.DEBUG_MODE === 'true') {
-                jlarg2.push('DEBUG_MODE')
-            }
+            const jlarg2 = [startupPath, pipename, telemetry.getCrashReportingPipename()]
+            jlarg2.push(`USE_REVISE=${vscode.workspace.getConfiguration('julia').get('useRevise')}`)
+            jlarg2.push(`USE_PLOTPANE=${vscode.workspace.getConfiguration('julia').get('usePlotPane')}`)
+            jlarg2.push(`DEBUG_MODE=${process.env.DEBUG_MODE}`)
             return jlarg2
         }
 
@@ -161,6 +156,8 @@ const notifyTypeReplStartDebugger = new rpc.NotificationType<string, void>('repl
 const notifyTypeReplStartEval = new rpc.NotificationType<void, void>('repl/starteval')
 export const notifyTypeReplFinishEval = new rpc.NotificationType<void, void>('repl/finisheval')
 export const notifyTypeReplShowInGrid = new rpc.NotificationType<string, void>('repl/showingrid')
+const notifyTypeShowProfilerResult = new rpc.NotificationType<string, void>('repl/showprofileresult')
+const notifyTypeShowProfilerResultFile = new rpc.NotificationType<string, void>('repl/showprofileresult_file')
 
 const g_onInit = new vscode.EventEmitter<rpc.MessageConnection>()
 export const onInit = g_onInit.event
@@ -187,6 +184,8 @@ function startREPLMsgServer(pipename: string) {
         g_connection.onNotification(notifyTypeDebuggerRun, debuggerRun)
         g_connection.onNotification(notifyTypeDebuggerEnter, debuggerEnter)
         g_connection.onNotification(notifyTypeReplStartEval, () => { })
+        g_connection.onNotification(notifyTypeShowProfilerResult, showProfileResult)
+        g_connection.onNotification(notifyTypeShowProfilerResultFile, showProfileResultFile)
 
         g_connection.listen()
 
@@ -222,7 +221,8 @@ async function executeFile(uri?: vscode.Uri) {
         path = editor.document.fileName
         code = editor.document.getText()
 
-        module = await modules.getModuleForEditor(editor, new vscode.Position(0, 0))
+        const pos = editor.document.validatePosition(new vscode.Position(0, 1)) // xref: https://github.com/julia-vscode/julia-vscode/issues/1500
+        module = await modules.getModuleForEditor(editor.document, pos)
     }
 
     await g_connection.sendRequest(
@@ -284,7 +284,14 @@ async function selectJuliaBlock() {
     vscode.window.activeTextEditor.revealRange(new vscode.Range(start_pos, end_pos))
 }
 
-const g_cellDelimiter = new RegExp('^##(?!#)')
+const g_cellDelimiters = [
+    /^##(?!#)/,
+    /^#(\s?)%%/
+]
+
+function isCellBorder(s: string) {
+    return g_cellDelimiters.some(regex => regex.test(s))
+}
 
 async function executeCell(shouldMove: boolean = false) {
     telemetry.traceEvent('command-executeCell')
@@ -294,7 +301,7 @@ async function executeCell(shouldMove: boolean = false) {
     const curr = doc.validatePosition(ed.selection.active).line
     let start = curr
     while (start >= 0) {
-        if (g_cellDelimiter.test(doc.lineAt(start).text)) {
+        if (isCellBorder(doc.lineAt(start).text)) {
             break
         } else {
             start -= 1
@@ -303,7 +310,7 @@ async function executeCell(shouldMove: boolean = false) {
     start += 1
     let end = start
     while (end < doc.lineCount) {
-        if (g_cellDelimiter.test(doc.lineAt(end).text)) {
+        if (isCellBorder(doc.lineAt(end).text)) {
             break
         } else {
             end += 1
@@ -315,9 +322,9 @@ async function executeCell(shouldMove: boolean = false) {
     const nextpos = ed.document.validatePosition(new vscode.Position(end + 1, 0))
     const code = doc.getText(new vscode.Range(startpos, endpos))
 
-    await startREPL(true, false)
+    const module: string = await modules.getModuleForEditor(ed.document, startpos)
 
-    const module: string = await modules.getModuleForEditor(ed, startpos)
+    await startREPL(true, false)
 
     if (shouldMove) {
         vscode.window.activeTextEditor.selection = new vscode.Selection(nextpos, nextpos)
@@ -347,7 +354,7 @@ async function evaluateBlockOrSelection(shouldMove: boolean = false) {
             position: startpos
         }
 
-        const module: string = await modules.getModuleForEditor(editor, startpos)
+        const module: string = await modules.getModuleForEditor(editor.document, startpos)
 
         if (selection.isEmpty) {
             const currentBlock = await getBlockRange(params)

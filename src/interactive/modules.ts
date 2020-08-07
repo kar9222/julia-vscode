@@ -2,6 +2,7 @@ import * as vscode from 'vscode'
 import * as rpc from 'vscode-jsonrpc'
 import * as vslc from 'vscode-languageclient'
 import { onSetLanguageClient } from '../extension'
+import * as telemetry from '../telemetry'
 import { VersionedTextDocumentPositionParams } from './misc'
 import { onExit, onInit } from './repl'
 
@@ -47,25 +48,24 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(statusBarItem)
 }
 
-export async function getModuleForEditor(editor: vscode.TextEditor, position: vscode.Position = editor.selection.start) {
-    let mod = manuallySetDocuments[editor.document.fileName]
+export async function getModuleForEditor(document: vscode.TextDocument, position: vscode.Position) {
+    const manuallySetModule = manuallySetDocuments[document.fileName]
+    if (manuallySetModule) { return manuallySetModule }
 
-    if (mod === undefined) {
+    if (!g_languageClient) { return 'Main' }
+    try {
         const params: VersionedTextDocumentPositionParams = {
-            textDocument: vslc.TextDocumentIdentifier.create(editor.document.uri.toString()),
-            version: editor.document.version,
+            textDocument: vslc.TextDocumentIdentifier.create(document.uri.toString()),
+            version: document.version,
             position: position
         }
-
-        try {
-            mod = await g_languageClient.sendRequest('julia/getModuleAt', params)
-        } catch (err) {
-            console.error(err)
-            mod = 'Main'
+        return await g_languageClient.sendRequest<string>('julia/getModuleAt', params)
+    } catch (err) {
+        if (g_languageClient) {
+            telemetry.handleNewCrashReportFromException(err, 'Extension')
         }
+        return 'Main'
     }
-
-    return mod
 }
 
 function isJuliaEditor(editor: vscode.TextEditor = vscode.window.activeTextEditor) {
@@ -87,23 +87,21 @@ async function updateModuleForSelectionEvent(event: vscode.TextEditorSelectionCh
 }
 
 async function updateModuleForEditor(editor: vscode.TextEditor) {
-    let mod = 'Main'
-    try {
-        mod = await getModuleForEditor(editor)
-    } catch (err) {
-        console.error(err)
-        return
-    }
-
-    let loaded = false
-    try {
-        loaded = await g_connection.sendRequest(requestTypeIsModuleLoaded, mod)
-    } catch (err) {
-        console.error(err)
-        return
-    }
-
+    const mod = await getModuleForEditor(editor.document, editor.selection.start)
+    const loaded = await isModuleLoaded(mod)
     statusBarItem.text = loaded ? mod : '(' + mod + ')'
+}
+
+async function isModuleLoaded(mod: string) {
+    if (!g_connection) { return false }
+    try {
+        return await g_connection.sendRequest(requestTypeIsModuleLoaded, mod)
+    } catch (err) {
+        if (g_connection) {
+            telemetry.handleNewCrashReportFromException(err, 'Extension')
+        }
+        return false
+    }
 }
 
 async function chooseModule() {
@@ -111,8 +109,11 @@ async function chooseModule() {
     try {
         possibleModules = await g_connection.sendRequest(requestTypeGetModules, null)
     } catch (err) {
-        console.error(err)
-        vscode.window.showInformationMessage('Setting a module requires an active REPL.')
+        if (g_connection) {
+            telemetry.handleNewCrashReportFromException(err, 'Extension')
+        } else {
+            vscode.window.showInformationMessage('Setting a module requires an active REPL.')
+        }
         return
     }
 

@@ -2,6 +2,10 @@ import * as os from 'os'
 import * as path from 'path'
 import * as vscode from 'vscode'
 
+export function setContext(contextKey: string, state: boolean) {
+    vscode.commands.executeCommand('setContext', contextKey, state)
+}
+
 export function generatePipeName(pid: string, name: string) {
     if (process.platform === 'win32') {
         return '\\\\.\\pipe\\' + name + '-' + pid
@@ -27,10 +31,10 @@ export function generatePipeName(pid: string, name: string) {
  * @returns A string to set the value of `JULIA_NUM_THREADS`
  */
 export function inferJuliaNumThreads(): string {
-    const config: number | null = vscode.workspace.getConfiguration('julia').get('NumThreads')
+    const config: number | undefined = vscode.workspace.getConfiguration('julia').get('NumThreads') ?? undefined
     const env: string | undefined = process.env['JULIA_NUM_THREADS']
 
-    if (config !== null) {
+    if (config !== undefined) {
         return config.toString()
     }
     else if (env !== undefined) {

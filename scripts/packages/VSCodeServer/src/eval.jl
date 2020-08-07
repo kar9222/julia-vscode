@@ -51,7 +51,11 @@ function repl_runcode_request(conn, params::ReplRunCodeRequestParams)
                     Base.display_error(stderr, res)
 
                 elseif res !== nothing && !ends_with_semicolon(source_code)
-                    Base.invokelatest(display, res)
+                    try
+                        Base.invokelatest(display, res)
+                    catch err
+                        Base.display_error(stderr, err, catch_backtrace())
+                    end
                 end
             else
                 try
@@ -90,7 +94,7 @@ function safe_render(x)
         return ReplRunCodeRequestReturn(
             string("Display Error: ", out.inline),
             string("Display Error: ", out.all),
-            out.iserr
+            out.stackframe
         )
     end
 end
@@ -113,14 +117,16 @@ end
 
 render(::Nothing) = ReplRunCodeRequestReturn("✓", codeblock("nothing"))
 
-codeblock(s) = string("```julia", '\n', s, '\n', "```")
+indent4(s) = string(' ' ^ 4, s)
+codeblock(s) = joinlines(indent4.(splitlines(s)))
 
 struct EvalError
     err
     bt
 end
 
-sprint_error(err::LoadError) = sprint_error(err.error)
+sprint_error_unwrap(err::LoadError) = sprint_error(err.error)
+sprint_error_unwrap(err) = sprint_error(err)
 
 function sprint_error(err)
     sprintlimited(err, [], func = Base.display_error, limit = MAX_RESULT_LENGTH)
@@ -129,9 +135,9 @@ end
 function render(err::EvalError)
     bt = crop_backtrace(err.bt)
 
-    errstr = sprint_error(err.err)
+    errstr = sprint_error_unwrap(err.err)
     inline = strlimit(first(split(errstr, "\n")), limit = INLINE_RESULT_LENGTH)
-    all = string(codeblock(errstr), '\n', backtrace_string(bt))
+    all = string('\n', codeblock(errstr), '\n', backtrace_string(bt))
 
     # handle duplicates e.g. from recursion
     st = unique!(stacktrace(bt))
@@ -145,7 +151,10 @@ end
 function Base.display_error(io::IO, err::EvalError)
     bt = crop_backtrace(err.bt)
 
-    Base.display_error(io, err.err, bt)
+    try
+        Base.invokelatest(Base.display_error, io, err.err, bt)
+    catch err
+    end
 end
 
 function crop_backtrace(bt)
