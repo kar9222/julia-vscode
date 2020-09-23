@@ -58,6 +58,17 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
             return jlarg2
         }
 
+        const env = {
+            JULIA_EDITOR: get_editor(),
+            JULIA_NUM_THREADS: inferJuliaNumThreads(),
+            JULIA_REVISE: 'manual'
+        }
+
+        const pkgServer: string = vscode.workspace.getConfiguration('julia').get('packageServer')
+        if (pkgServer.length !== 0) {
+            env['JULIA_PKG_SERVER'] = pkgServer
+        }
+
         const juliaIsConnectedPromise = startREPLMsgServer(pipename)
         const exepath = await juliaexepath.getJuliaExePath()
         const pkgenvpath = await jlpkgenv.getEnvPath()
@@ -68,11 +79,7 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
                     name: 'Julia REPL',
                     shellPath: exepath,
                     shellArgs: jlarg1.concat(getArgs()),
-                    env: {
-                        JULIA_EDITOR: get_editor(),
-                        JULIA_NUM_THREADS: inferJuliaNumThreads(),
-                        JULIA_REVISE: 'manual'
-                    }
+                    env: env
                 })
         }
         else {
@@ -96,11 +103,7 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
                     name: 'Julia REPL',
                     shellPath: exepath,
                     shellArgs: jlarg1.concat(getArgs()),
-                    env: {
-                        JULIA_EDITOR: get_editor(),
-                        JULIA_NUM_THREADS: inferJuliaNumThreads(),
-                        JULIA_REVISE: 'manual'
-                    }
+                    env: env
                 })
         }
         g_terminal.show(preserveFocus)
@@ -108,6 +111,12 @@ async function startREPL(preserveFocus: boolean, showTerminal: boolean = true) {
     }
     else if (showTerminal) {
         g_terminal.show(preserveFocus)
+    }
+}
+
+function killREPL() {
+    if (g_terminal) {
+        g_terminal.dispose()
     }
 }
 
@@ -146,7 +155,8 @@ const requestTypeReplRunCode = new rpc.RequestType<{
     code: string,
     mod: string,
     showCodeInREPL: boolean,
-    showResultInREPL: boolean
+    showResultInREPL: boolean,
+    softscope: boolean
 }, ReturnResult, void, void>('repl/runcode')
 
 const notifyTypeDisplay = new rpc.NotificationType<{ kind: string, data: any }, void>('display')
@@ -234,7 +244,8 @@ async function executeFile(uri?: vscode.Uri) {
             mod: module,
             code: code,
             showCodeInREPL: false,
-            showResultInREPL: true
+            showResultInREPL: true,
+            softscope: false
         }
     )
     await workspace.replFinishEval()
@@ -410,7 +421,8 @@ async function evaluate(editor: vscode.TextEditor, range: vscode.Range, text: st
             code: text,
             mod: module,
             showCodeInREPL: codeInREPL,
-            showResultInREPL: resultType !== 'inline'
+            showResultInREPL: resultType !== 'inline',
+            softscope: true
         }
     )
 
@@ -485,6 +497,7 @@ export function activate(context: vscode.ExtensionContext) {
     }))
 
     context.subscriptions.push(vscode.commands.registerCommand('language-julia.startREPL', startREPLCommand))
+    context.subscriptions.push(vscode.commands.registerCommand('language-julia.stopREPL', killREPL))
 
     context.subscriptions.push(vscode.commands.registerCommand('language-julia.selectBlock', selectJuliaBlock))
 
