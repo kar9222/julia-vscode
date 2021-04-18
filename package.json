@@ -2,11 +2,11 @@
     "name": "language-julia",
     "displayName": "Julia",
     "description": "Julia Language Support",
-    "version": "1.1.38",
+    "version": "1.1.10",
     "preview": false,
     "publisher": "julialang",
     "engines": {
-        "vscode": "^1.54.0"
+        "vscode": "^1.52.0"
     },
     "license": "SEE LICENSE IN LICENSE",
     "bugs": {
@@ -31,6 +31,7 @@
         "onCommand:language-julia.changeCurrentEnvironment",
         "onCommand:language-julia.startREPL",
         "onCommand:language-julia.connectREPL",
+        "onCommand:language-julia.connectActiveREPL",
         "onCommand:language-julia.stopREPL",
         "onCommand:language-julia.executeCodeBlockOrSelection",
         "onCommand:language-julia.executeFile",
@@ -61,7 +62,43 @@
     ],
     "main": "./dist/extension",
     "contributes": {
+        "languages": [
+            {
+                "id": "julia",
+                "aliases": [
+                    "Julia",
+                    "julia"
+                ],
+                "extensions": [
+                    ".jl"
+                ],
+                "firstLine": "^#!\\s*/.*\\bjulia[0-9.-]*\\b",
+                "configuration": "./julia.configuration.json"
+            },
+            {
+                "id": "juliamarkdown",
+                "aliases": [
+                    "Julia Markdown",
+                    "juliamarkdown"
+                ],
+                "extensions": [
+                    ".jmd"
+                ]
+            }
+        ],
         "grammars": [
+            {
+                "language": "julia",
+                "scopeName": "source.julia",
+                "path": "./syntaxes/julia.json",
+                "embeddedLanguages": {
+                    "meta.embedded.inline.cpp": "cpp",
+                    "meta.embedded.inline.javascript": "javascript",
+                    "meta.embedded.inline.markdown": "juliamarkdown",
+                    "meta.embedded.inline.python": "python",
+                    "meta.embedded.inline.r": "r"
+                }
+            },
             {
                 "language": "juliamarkdown",
                 "scopeName": "text.html.markdown.julia",
@@ -108,12 +145,20 @@
                 "title": "Julia: Connect external REPL"
             },
             {
+                "command": "language-julia.connectActiveREPL",
+                "title": "Julia: Connect active REPL"
+            },
+            {
                 "command": "language-julia.stopREPL",
                 "title": "Julia: Stop REPL"
             },
             {
                 "command": "language-julia.executeCodeBlockOrSelection",
-                "title": "Julia: Execute Code in REPL"
+                "title": "Julia: Execute Code"
+            },
+            {
+                "command": "language-julia.executeJuliaCodeInREPLAndMove",
+                "title": "Julia: Send Current Line or Selection to REPL And Move"
             },
             {
                 "command": "language-julia.executeJuliaCodeInREPL",
@@ -121,11 +166,11 @@
             },
             {
                 "command": "language-julia.executeCodeBlockOrSelectionAndMove",
-                "title": "Julia: Execute Code in REPL and Move"
+                "title": "Julia: Execute Code And Move"
             },
             {
                 "command": "language-julia.executeFile",
-                "title": "Julia: Execute File in REPL",
+                "title": "Julia: Execute File",
                 "icon": "$(play)"
             },
             {
@@ -199,11 +244,11 @@
             },
             {
                 "command": "language-julia.executeCell",
-                "title": "Julia: Execute Code Cell in REPL"
+                "title": "Julia: Execute Code Cell"
             },
             {
                 "command": "language-julia.executeCellAndMove",
-                "title": "Julia: Execute Code Cell in REPL and Move"
+                "title": "Julia: Execute Code Cell And Move"
             },
             {
                 "command": "language-julia.moveCellUp",
@@ -270,18 +315,15 @@
                 },
                 {
                     "command": "language-julia.cdHere",
-                    "group": "julia",
-                    "when": "hasJuliaREPL"
+                    "group": "julia"
                 },
                 {
                     "command": "language-julia.activateHere",
-                    "group": "julia",
-                    "when": "hasJuliaREPL"
+                    "group": "julia"
                 },
                 {
                     "command": "language-julia.activateFromDir",
-                    "group": "julia",
-                    "when": "hasJuliaREPL"
+                    "group": "julia"
                 }
             ],
             "editor/title": [
@@ -315,6 +357,16 @@
                     "command": "language-julia.plotpane-delete-all"
                 },
                 {
+                    "command": "language-julia.executeFile",
+                    "when": "resourceLangId == julia",
+                    "group": "1_run@10"
+                },
+                {
+                    "command": "language-julia.debugEditorContents",
+                    "when": "resourceLangId == julia",
+                    "group": "1_run@20"
+                },
+                {
                     "command": "language-julia.clearAllInlineResultsInEditor",
                     "when": "editorLangId == julia"
                 },
@@ -329,23 +381,6 @@
                 {
                     "command": "language-julia.activateFromDir",
                     "group": "julia"
-                }
-            ],
-            "editor/title/run": [
-                {
-                    "command": "language-julia.executeFile",
-                    "when": "resourceLangId == julia",
-                    "group": "Julia@10"
-                },
-                {
-                    "command": "language-julia.runEditorContents",
-                    "when": "resourceLangId == julia",
-                    "group": "Julia@20"
-                },
-                {
-                    "command": "language-julia.debugEditorContents",
-                    "when": "resourceLangId == julia",
-                    "group": "Julia@30"
                 }
             ],
             "commandPalette": [
@@ -529,7 +564,7 @@
                     "type": "string",
                     "default": "",
                     "description": "Points to the julia executable.",
-                    "scope": "machine"
+                    "scope": "machine-overridable"
                 },
                 "julia.lint.run": {
                     "type": "boolean",
@@ -676,14 +711,6 @@
                     "default": null,
                     "scope": "machine-overridable",
                     "description": "Number of threads to use for Julia processes."
-                },
-                "julia.editor": {
-                    "type": [
-                        "string",
-                        "null"
-                    ],
-                    "default": null,
-                    "markdownDescription": "Command to open files from the REPL (via setting the `JULIA_EDITOR` environment variable). Defaults to `code`/`code-insiders` if unset."
                 },
                 "julia.format.indent": {
                     "type": "integer",
@@ -969,11 +996,11 @@
         "updatedeps": "npm run compile && node ./out/scripts/updateDeps.js"
     },
     "dependencies": {
-        "@traptitech/markdown-it-katex": "^3.4.0",
+        "@traptitech/markdown-it-katex": "^3.3.1",
         "@types/applicationinsights": "^0.20.0",
         "@types/child-process-promise": "^2.2.1",
-        "@types/vscode": "^1.54.0",
-        "applicationinsights": "^1.8.10",
+        "@types/vscode": "^1.52.0",
+        "applicationinsights": "^1.8.9",
         "async-child-process": "^v1.1.1",
         "async-file": "^v2.0.2",
         "await-notify": "^1.0.1",
@@ -982,26 +1009,26 @@
         "markdown-it-footnote": "^3.0.2",
         "promised-temp": "^v0.1.0",
         "uuidv4": "^6.2.6",
-        "vscode-debugadapter": "^1.45.0",
+        "vscode-debugadapter": "^1.44.0",
         "vscode-jsonrpc": "^6.0.0",
         "vscode-languageclient": "^7.0.0",
         "which": "^2.0.2"
     },
     "devDependencies": {
+        "@types/cson-parser": "^4.0.4",
         "@types/download": "^6.2.4",
         "@types/markdown-it": "^12.0.1",
-        "@types/mocha": "^8.2.1",
-        "@types/node": "^12.20.6",
-        "@types/semver": "^7.3.4",
-        "@typescript-eslint/parser": "^4.18.0",
+        "@types/mocha": "^8.2.0",
+        "@types/node": "^12.19.15",
+        "@typescript-eslint/parser": "^4.14.1",
+        "cson-parser": "^4.0.7",
         "download": "^8.0.0",
-        "eslint": "^7.22.0",
-        "mocha": "^8.3.2",
-        "semver": "^7.3.4",
-        "ts-loader": "^8.0.18",
-        "typescript": "^4.2.3",
-        "vsce": "^1.87.0",
-        "vscode-test": "^1.5.1",
+        "eslint": "^7.18.0",
+        "mocha": "^8.2.1",
+        "ts-loader": "^8.0.14",
+        "typescript": "^4.1.3",
+        "vsce": "^1.84.0",
+        "vscode-test": "^1.5.0",
         "webpack": "^4.46.0",
         "webpack-cli": "^3.3.12"
     }
