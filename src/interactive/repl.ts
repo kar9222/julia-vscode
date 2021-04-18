@@ -168,6 +168,16 @@ async function connectREPL() {
     }
 }
 
+async function connectActiveREPL() {
+    const pipename = generatePipeName(uuid(), 'vsc-jl-repl')
+    const juliaIsConnectedPromise = startREPLMsgServer(pipename)
+    const connectJuliaCode = juliaConnector(pipename, true)
+    const activeTerm = vscode.window.activeTerminal
+
+    activeTerm.sendText(connectJuliaCode)
+    await juliaIsConnectedPromise.wait()
+}
+
 function killREPL() {
     if (g_terminal) {
         g_terminal.dispose()
@@ -854,6 +864,7 @@ export function activate(context: vscode.ExtensionContext) {
         // commands
         registerCommand('language-julia.startREPL', startREPLCommand),
         registerCommand('language-julia.connectREPL', connectREPL),
+        registerCommand('language-julia.connectActiveREPL', connectActiveREPL),
         registerCommand('language-julia.stopREPL', killREPL),
         registerCommand('language-julia.selectBlock', selectJuliaBlock),
         registerCommand('language-julia.executeCodeBlockOrSelection', evaluateBlockOrSelection),
@@ -865,6 +876,7 @@ export function activate(context: vscode.ExtensionContext) {
         registerCommand('language-julia.executeFile', executeFile),
         registerCommand('language-julia.interrupt', interrupt),
         registerCommand('language-julia.executeJuliaCodeInREPL', executeSelectionCopyPaste), // copy-paste selection into REPL. doesn't require LS to be started
+        registerCommand('language-julia.executeJuliaCodeInREPLAndMove', executeSelectionCopyPasteAndMove), // copy-paste selection into REPL. doesn't require LS to be started
         registerCommand('language-julia.cdHere', cdToHere),
         registerCommand('language-julia.activateHere', activateHere),
         registerCommand('language-julia.activateFromDir', activateFromDir),
@@ -881,4 +893,68 @@ export function activate(context: vscode.ExtensionContext) {
     plots.activate(context)
     workspace.activate(context)
     modules.activate(context)
+}
+
+
+
+
+
+
+
+
+
+
+
+// TODO `getBlockRange` require languageserver? hence need to start REPL?
+// `async` for `await getBlockRange(...)`
+async function executeSelectionCopyPasteAndMove() {
+    telemetry.traceEvent('command-executeSelectionCopyPaste')
+
+    const editor = vscode.window.activeTextEditor
+    if (!editor) {
+        return
+    }
+
+    // Use codes from `selectCodeBlock` to get positions -----------------------
+
+    telemetry.traceEvent('command-selectCodeBlock')
+
+    const position = editor.document.validatePosition(editor.selection.start)
+    const ret_val = await getBlockRange(getVersionedParamsAtPosition(editor.document, position))
+
+    const start_pos = new vscode.Position(ret_val[0].line, ret_val[0].character)
+    const end_pos = new vscode.Position(ret_val[1].line, ret_val[1].character)
+
+    // From `validateMoveAndReveal` to get range without revealing -------------
+    // ...range for text
+
+    const doc = editor.document
+    const startpos = doc.validatePosition(start_pos)
+    const endpos = doc.validatePosition(end_pos)
+
+    const text = editor.document.getText(new vscode.Range(startpos, endpos))
+
+    // Move to end of block ----------------------------------------------------
+
+    const end_pos_2 = new vscode.Position(ret_val[1].line + 1, ret_val[1].character)
+    editor.selection = new vscode.Selection(end_pos_2, end_pos_2)
+    editor.revealRange(new vscode.Range(end_pos_2, end_pos_2))
+
+    // From `executeCodeCopyPaste` ---------------------------------------------
+
+    // Required by `getBlockRange` ?? TODO
+    // await startREPL(true, true)
+
+    let lines = text.split(/\r?\n/)
+    lines = lines.filter(line => line !== '')
+    const text_2 = lines.join('\n')
+
+    g_terminal = vscode.window.activeTerminal
+
+    if (process.platform === 'win32') {
+        g_terminal.sendText(text_2 + '\n', false)
+    }
+    else {
+        g_terminal.sendText('\u001B[200~' + text_2 + '\n' + '\u001B[201~', false)
+    }
 }

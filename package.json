@@ -31,6 +31,7 @@
         "onCommand:language-julia.changeCurrentEnvironment",
         "onCommand:language-julia.startREPL",
         "onCommand:language-julia.connectREPL",
+        "onCommand:language-julia.connectActiveREPL",
         "onCommand:language-julia.stopREPL",
         "onCommand:language-julia.executeCodeBlockOrSelection",
         "onCommand:language-julia.executeFile",
@@ -108,6 +109,10 @@
                 "title": "Julia: Connect external REPL"
             },
             {
+                "command": "language-julia.connectActiveREPL",
+                "title": "Julia: Connect active REPL"
+            },
+            {
                 "command": "language-julia.stopREPL",
                 "title": "Julia: Stop REPL"
             },
@@ -118,6 +123,10 @@
             {
                 "command": "language-julia.executeJuliaCodeInREPL",
                 "title": "Julia: Send Current Line or Selection to REPL"
+            },
+            {
+                "command": "language-julia.executeJuliaCodeInREPLAndMove",
+                "title": "Julia: Send Current Line or Selection to REPL and Move"
             },
             {
                 "command": "language-julia.executeCodeBlockOrSelectionAndMove",
