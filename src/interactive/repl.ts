@@ -940,6 +940,25 @@ async function executeSelectionCopyPasteAndMove() {
     editor.selection = new vscode.Selection(end_pos_2, end_pos_2)
     editor.revealRange(new vscode.Range(end_pos_2, end_pos_2))
 
+    // From `evaluateBlockOrSelection` -----------
+    // TODO
+
+    const n_line = ret_val[1].line - ret_val[0].line
+
+    if (n_line >= 5) {
+        const range = new vscode.Range(start_pos, end_pos)
+
+        const tempDecoration = vscode.window.createTextEditorDecorationType({
+            backgroundColor: new vscode.ThemeColor('editor.hoverHighlightBackground'),
+            isWholeLine: true
+        })
+        editor.setDecorations(tempDecoration, [range])
+
+        setTimeout(() => {
+            editor.setDecorations(tempDecoration, [])
+        }, 200)
+    }
+
     // From `executeCodeCopyPaste` ---------------------------------------------
 
     // Required by `getBlockRange` ?? TODO
