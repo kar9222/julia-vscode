@@ -62,7 +62,43 @@
     ],
     "main": "./dist/extension",
     "contributes": {
+        "languages": [
+            {
+                "id": "julia",
+                "aliases": [
+                    "Julia",
+                    "julia"
+                ],
+                "extensions": [
+                    ".jl"
+                ],
+                "firstLine": "^#!\\s*/.*\\bjulia[0-9.-]*\\b",
+                "configuration": "./julia.language-configuration.json"
+            },
+            {
+                "id": "juliamarkdown",
+                "aliases": [
+                    "Julia Markdown",
+                    "juliamarkdown"
+                ],
+                "extensions": [
+                    ".jmd"
+                ]
+            }
+        ],
         "grammars": [
+            {
+                "language": "julia",
+                "scopeName": "source.julia",
+                "path": "./syntaxes/julia.json",
+                "embeddedLanguages": {
+                    "meta.embedded.inline.cpp": "cpp",
+                    "meta.embedded.inline.javascript": "javascript",
+                    "meta.embedded.inline.markdown": "juliamarkdown",
+                    "meta.embedded.inline.python": "python",
+                    "meta.embedded.inline.r": "r"
+                }
+            },
             {
                 "language": "juliamarkdown",
                 "scopeName": "text.html.markdown.julia",
